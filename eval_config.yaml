@@ -1,0 +1,90 @@
+# Voice AI Evaluation Pipeline Configuration
+# All settings here override environment variables
+
+evaluation:
+  seed: 42                          # Fixed seed for full determinism
+  run_id_prefix: "eval"
+  output_dir: "./reports"
+  parallel_workers: 1               # Keep at 1 for strict determinism
+
+whisper:
+  model_size: "base"                # tiny | base | small | medium | large
+  device: "cpu"                     # cpu | cuda | mps
+  language: "en"
+  fp16: false                       # Set true for GPU acceleration
+  # Fixed decode options for determinism
+  decode_options:
+    beam_size: 5
+    best_of: 5
+    temperature: 0.0                # Greedy decoding — fully deterministic
+    compression_ratio_threshold: 2.4
+    logprob_threshold: -1.0
+    no_speech_threshold: 0.6
+
+ollama:
+  host: "http://localhost:11434"
+  model: "llama3"
+  timeout: 120
+  # LLM params — all fixed for determinism
+  options:
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
+    seed: 42
+    num_predict: 512
+
+metrics:
+  wer:
+    enabled: true
+    # Text normalization pipeline applied before WER scoring
+    normalize:
+      lowercase: true
+      remove_punctuation: true
+      expand_contractions: true
+      strip_extra_whitespace: true
+
+  latency:
+    enabled: true
+    measure_ttfb: true              # Time to first byte
+    measure_total: true
+    warmup_runs: 1                  # Discard first N runs from stats
+    percentiles: [50, 90, 95, 99]
+
+  semantic_similarity:
+    enabled: true
+    # Dual-mode: embedding cosine + LLM judge (averaged)
+    embedding_model: "all-MiniLM-L6-v2"
+    llm_judge: true
+    llm_judge_weight: 0.4           # Weight of LLM score vs embedding
+    embedding_weight: 0.6
+
+  hallucination:
+    enabled: true
+    # Grounding check: LLM determines if response is factually supported
+    check_factual_grounding: true
+    check_context_faithfulness: true
+    # Confidence threshold — scores below this flag as hallucination
+    confidence_threshold: 0.5
+
+scoring:
+  # Composite score weights (must sum to 1.0)
+  weights:
+    wer: 0.25
+    latency: 0.20
+    semantic_similarity: 0.30
+    hallucination: 0.25
+  # Latency scoring: maps ms → 0–1 score
+  latency_thresholds:
+    excellent: 200    # ≤200ms → score 1.0
+    good: 500         # ≤500ms → score 0.75
+    acceptable: 1000  # ≤1000ms → score 0.5
+    poor: 2000        # ≤2000ms → score 0.25
+                      # >2000ms → score 0.0
+
+thresholds:
+  # Evaluation pass/fail thresholds
+  min_composite_score: 0.70
+  max_wer: 0.15
+  max_latency_ms: 1000
+  min_semantic_similarity: 0.75
+  max_hallucination_rate: 0.10
